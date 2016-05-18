@@ -1,3 +1,5 @@
+This is a fork of the below repo. This has integrated server side support.
+
 jQuery DataTables Checkboxes
 ============================
 
