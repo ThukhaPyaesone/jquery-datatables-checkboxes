@@ -1,3 +1,6 @@
+/*
+This is a modified version of the below code. Added Serverside support.
+*/
 /*! Checkboxes 1.0.0
  *  Copyright (c) Gyrocode (www.gyrocode.com)
  *  License: MIT License
@@ -48,7 +51,7 @@ var Checkboxes = function ( settings ) {
    this.s = {
       dt: new DataTable.Api( settings ),
       columns: [],
-      data: {},
+      data: {selected: {}, suppressed : {}},
       ignoreSelect: false
    };
 
@@ -135,11 +138,18 @@ Checkboxes.prototype = {
             // DATA
             //
 
+
             // Initialize array holding data for selected checkboxes
-            self.s.data[i] = [];
+            //This is now an array of selected and suppressed checkboxes
+            self.s.data.selected[i] = [];
+            self.s.data.suppressed[i] = [];
 
             // Store column index for easy column selection later
             self.s.columns.push(i);
+            
+            
+            //Global variable if check_all was checked or not
+            self.s.check_all = false;
 
 
             //
@@ -261,17 +271,33 @@ Checkboxes.prototype = {
                // Get cell data
                var cellData = this.data();
 
-               // Determine whether data is in the list
-               var index = $.inArray(cellData, ctx.checkboxes.s.data[cellCol]);
 
-               // If checkbox is checked and data is not in the list
-               if(isSelected && index === -1){
-                  ctx.checkboxes.s.data[cellCol].push(cellData);
 
-               // Otherwise, if checkbox is not checked and data is in the list
-               } else if (!isSelected && index !== -1){
-                  ctx.checkboxes.s.data[cellCol].splice(index, 1);
-               }
+               
+                //If server side then we want to keep track of the suppressed ones 
+                //If the checkbox is checked and check all then remove from rows_supressed
+                    if(ctx.oFeatures.bServerSide && self.s.check_all){
+                        var index = $.inArray(cellData, ctx.checkboxes.s.data.suppressed[cellCol]);
+                        if(isSelected  && index !== -1){
+                              ctx.checkboxes.s.data.suppressed[cellCol].splice(index, 1);
+                       }else if(!isSelected  && index === -1){//If the checkbox is not checked and check all is true then add to the suppress list
+                             ctx.checkboxes.s.data.suppressed[cellCol].push(cellData);
+                       }
+                    }else if(!self.s.check_all){//default behaviour
+                            // Determine whether data is in the list
+                            var index = $.inArray(cellData, ctx.checkboxes.s.data.selected[cellCol]);
+               
+                        //else, function as usual
+                        // If checkbox is checked and data is not in the list
+                        if(isSelected && index === -1){
+                           ctx.checkboxes.s.data.selected[cellCol].push(cellData);
+
+                        // Otherwise, if checkbox is not checked and data is in the list
+                        } else if (!isSelected && index !== -1){
+                           ctx.checkboxes.s.data.selected[cellCol].splice(index, 1);
+
+                        }
+                }
             }
          });
       }
@@ -389,6 +415,8 @@ Checkboxes.prototype = {
 
       // If Checkboxes extension is enabled for this column
       if(ctx.aoColumns[cellCol].checkboxes){
+          
+          
          self.updateCheckbox('cell', $cell, ctrl.checked);
          self.updateData('cell', $cell, ctrl.checked);
          self.updateSelect('cell', $cell, ctrl.checked);
@@ -449,6 +477,22 @@ Checkboxes.prototype = {
          self.updateSelect('row', rows.nodes(), ctrl.checked);
       }
 
+      //Since we are dealing with 100s of thousands of records,
+      //if server side is enabled, and check_all is true, we only care about the records
+      //not selected
+      //if check all is clicked, mark the checked all flag
+      if(ctrl.checked){
+          self.s.check_all = true;
+      } else{
+          self.s.check_all = false;
+      }
+     
+      //Clear the rows_selected, and rows_suppressed on every Select All click if serverside is enabled
+      if(ctx.oFeatures.bServerSide){  
+          self.s.data.selected[0] = [];
+          self.s.data.suppressed[0] = [];
+       }
+      
       self.updateSelectAll();
 
       e.stopPropagation();
@@ -460,6 +504,7 @@ Checkboxes.prototype = {
       var dt = self.s.dt;
       ctx = dt.settings()[0];
 
+      
       var rows_seen = {};
       // Enumerate all cells
       dt.cells('tr', self.s.columns, { page: 'current', search: 'applied' }).every(function(){
@@ -469,19 +514,38 @@ Checkboxes.prototype = {
          // Get cell data
          var cellData = this.data();
 
-         // Determine whether data is in the list
-         var index = $.inArray(cellData, ctx.checkboxes.s.data[cellColIdx]);
 
-         // If data is in the list
-         if(index !== -1){
-            // If this row hasn't been processed yet
-            if(!rows_seen.hasOwnProperty(cellRowIdx)){
-               self.updateCheckbox('cell', this.node(), true);
-               self.updateSelect('cell', this.node(), true);
+         
+         //If server side and check_all has been selected
+         if(ctx.oFeatures.bServerSide && self.s.check_all){
+             //If its not in the suppressed array, check it
+             var index = $.inArray(cellData, ctx.checkboxes.s.data.suppressed[cellColIdx]);
+             if(index === -1){
+               // If this row hasn't been processed yet
+               if(!rows_seen.hasOwnProperty(cellRowIdx)){
+                  self.updateCheckbox('cell', this.node(), true);
+                  self.updateSelect('cell', this.node(), true);
+                  if(ctx.aoColumns[cellColIdx].checkboxes && ctx.aoColumns[cellColIdx].checkboxes.selectRow){
+                     // Mark row as processed
+                     rows_seen[cellRowIdx] = true;
+                  }
+               }                 
+             }
+         }else{//default behaviour
+       // Determine whether data is in the list
+            var index = $.inArray(cellData, ctx.checkboxes.s.data.selected[cellColIdx]);
 
-               if(ctx.aoColumns[cellColIdx].checkboxes && ctx.aoColumns[cellColIdx].checkboxes.selectRow){
-                  // Mark row as processed
-                  rows_seen[cellRowIdx] = true;
+            // If data is in the list
+            if(index !== -1){
+               // If this row hasn't been processed yet
+               if(!rows_seen.hasOwnProperty(cellRowIdx)){
+                  self.updateCheckbox('cell', this.node(), true);
+                  self.updateSelect('cell', this.node(), true);
+
+                  if(ctx.aoColumns[cellColIdx].checkboxes && ctx.aoColumns[cellColIdx].checkboxes.selectRow){
+                     // Mark row as processed
+                     rows_seen[cellRowIdx] = true;
+                  }
                }
             }
          }
@@ -523,9 +587,14 @@ Checkboxes.prototype = {
 
             // If all of the checkboxes are checked
             } else if ($chkbox_checked.length === $chkbox_all.length) {
-               chkbox_select_all.checked = true;
-               if ('indeterminate' in chkbox_select_all) {
-                  chkbox_select_all.indeterminate = false;
+               //We need to check if server side is on and if size of suppress is > 0 
+               if(ctx.oFeatures.bServerSide && self.s.data.suppressed[0].length > 0){
+                   chkbox_select_all.indeterminate = true;
+               }else{
+                    chkbox_select_all.checked = true;
+                    if ('indeterminate' in chkbox_select_all) {
+                       chkbox_select_all.indeterminate = false;
+                    }
                }
 
             // If some of the checkboxes are checked
@@ -537,6 +606,23 @@ Checkboxes.prototype = {
             }
          }
       }
+
+   },
+   
+   //This just returns the generic where clause
+   //TODO Set a variable template so this returns from the template
+   getWhere: function(){
+      var self = this;
+      var dt = self.s.dt;
+      var ctx = dt.settings()[0];   
+      
+      //if check all is selected, return the suppressed,
+      //else return selected
+       if(self.s.check_all){
+           return 'Not In: ' + self.s.data.suppressed[0].join(",");
+       }
+           
+       return 'In: ' + self.s.data.selected[0].join(",");
    }
 };
 
@@ -624,11 +710,26 @@ Api.registerPlural( 'cells().checkboxes.deselect()', 'cell().checkboxes.deselect
 Api.registerPlural( 'columns().checkboxes.selected()', 'column().checkboxes.selected()', function () {
    return this.iterator( 'column', function (ctx, colIdx){
       if(ctx.aoColumns[colIdx].checkboxes){
-         return ctx.checkboxes.s.data[colIdx];
+         return ctx.checkboxes.s.data.selected[colIdx];
       }
    }, 1 );
 } );
 
+//Get suppressed rows
+Api.registerPlural( 'columns().checkboxes.suppressed()', 'column().checkboxes.suppressed()', function () {
+   return this.iterator( 'column', function (ctx, colIdx){
+      if(ctx.aoColumns[colIdx].checkboxes){
+         return ctx.checkboxes.s.data.suppressed[colIdx];
+      }
+   }, 1 );
+} );
+
+//This is a custom function to get the query based on what is selected.
+Api.registerPlural( 'checkboxes.where()', 'checkboxes.where()', function (a) {
+        //return this.iterator('table', function(ctx) {
+            return this.settings()[0].checkboxes.getWhere();
+        //});
+} );
 
 /**
  * Version information
